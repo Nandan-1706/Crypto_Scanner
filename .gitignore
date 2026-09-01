@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.mypy_cache/
+*.egg-info/
+
+# Scan output/reports (generated, not source)
+*.json
+!sample_project/**/*.json
+
+# Editor/OS cruft
+.vscode/
+.idea/
+.DS_Store

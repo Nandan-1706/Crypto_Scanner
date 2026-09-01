@@ -1,0 +1,4 @@
+cryptography>=46.0
+
+# Dev/test only - not needed to run the scanner itself
+pytest>=8.0
