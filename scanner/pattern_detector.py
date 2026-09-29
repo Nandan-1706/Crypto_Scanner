@@ -35,13 +35,21 @@ _PATTERNS: list[tuple[str, re.Pattern, Confidence]] = [
     ("ECC", re.compile(r"\bECC\b"), Confidence.LOW),
     ("ECDSA", re.compile(r"\bECDSA\b"), Confidence.LOW),
     ("ECDH", re.compile(r"\bECDH\b"), Confidence.LOW),
+    ("DSA", re.compile(r"\bDSA\b"), Confidence.LOW),   # word-bounded so it does NOT match inside "ECDSA"
+    ("DH", re.compile(r"\bDH\b"), Confidence.LOW),       # finite-field Diffie-Hellman keyword - noisy but documented as such
+    ("3DES", re.compile(r"\b3DES\b|\bTriple\s*DES\b|\bTripleDES\b", re.IGNORECASE), Confidence.LOW),
+    ("DES", re.compile(r"\bDES\b"), Confidence.LOW),     # word-bounded so it does NOT match inside "3DES"
+    ("SHA-224", re.compile(r"\bSHA-?224\b", re.IGNORECASE), Confidence.LOW),
     ("SHA-256", re.compile(r"\bSHA-?256\b", re.IGNORECASE), Confidence.LOW),
+    ("SHA-384", re.compile(r"\bSHA-?384\b", re.IGNORECASE), Confidence.LOW),
+    ("SHA-512", re.compile(r"\bSHA-?512\b", re.IGNORECASE), Confidence.LOW),
     ("SHA-1", re.compile(r"\bSHA-?1\b", re.IGNORECASE), Confidence.LOW),
     ("MD5", re.compile(r"\bMD5\b", re.IGNORECASE), Confidence.LOW),
-    # These two are more specific substrings (an actual import/attribute
+    # These are more specific substrings (an actual import/attribute
     # access pattern), so they earn MEDIUM confidence instead of LOW.
     ("cryptography_library", re.compile(r"\bfrom\s+cryptography\b|\bimport\s+cryptography\b"), Confidence.MEDIUM),
     ("hashlib", re.compile(r"\bhashlib\.\w+"), Confidence.MEDIUM),
+    ("pycryptodome_library", re.compile(r"\bfrom\s+Crypto\b|\bimport\s+Crypto\b"), Confidence.MEDIUM),
 ]
 
 

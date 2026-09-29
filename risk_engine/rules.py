@@ -144,12 +144,84 @@ RULES: list[Rule] = [
         rationale="SHA-256 is currently approved and is not on NIST IR 8547's quantum-vulnerable deprecation schedule.",
         standard_reference=f"{SP_800_131A_REV2}; {IR_8547_DRAFT}",
     ),
+    Rule(
+        rule_id="SHA224-001",
+        algorithm="SHA-224",
+        key_size_min=None, key_size_max=None, requires_known_key_size=False,
+        classical_risk=ClassicalRiskLevel.ACCEPTABLE_TODAY,
+        quantum_risk=QuantumRiskLevel.LOW,
+        rationale="SHA-224 (part of the SHA-2 family) is currently approved and is not on NIST IR 8547's quantum-vulnerable deprecation schedule.",
+        standard_reference=f"{SP_800_131A_REV2}; {IR_8547_DRAFT}",
+    ),
+    Rule(
+        rule_id="SHA384-001",
+        algorithm="SHA-384",
+        key_size_min=None, key_size_max=None, requires_known_key_size=False,
+        classical_risk=ClassicalRiskLevel.ACCEPTABLE_TODAY,
+        quantum_risk=QuantumRiskLevel.LOW,
+        rationale="SHA-384 (part of the SHA-2 family) is currently approved and is not on NIST IR 8547's quantum-vulnerable deprecation schedule.",
+        standard_reference=f"{SP_800_131A_REV2}; {IR_8547_DRAFT}",
+    ),
+    Rule(
+        rule_id="SHA512-001",
+        algorithm="SHA-512",
+        key_size_min=None, key_size_max=None, requires_known_key_size=False,
+        classical_risk=ClassicalRiskLevel.ACCEPTABLE_TODAY,
+        quantum_risk=QuantumRiskLevel.LOW,
+        rationale="SHA-512 (part of the SHA-2 family) is currently approved and is not on NIST IR 8547's quantum-vulnerable deprecation schedule.",
+        standard_reference=f"{SP_800_131A_REV2}; {IR_8547_DRAFT}",
+    ),
+    Rule(
+        rule_id="DES-001",
+        algorithm="DES",
+        key_size_min=None, key_size_max=None, requires_known_key_size=False,
+        classical_risk=ClassicalRiskLevel.CRITICAL,
+        quantum_risk=QuantumRiskLevel.NOT_APPLICABLE,
+        rationale="DES (56-bit effective key) is trivially breakable with modern hardware and its FIPS approval (FIPS 46-3) was withdrawn; it should not be used for any security purpose, independent of quantum considerations.",
+        standard_reference="FIPS 46-3 (withdrawn, 2005)",
+    ),
+    Rule(
+        rule_id="3DES-001",
+        algorithm="3DES",
+        key_size_min=None, key_size_max=None, requires_known_key_size=False,
+        classical_risk=ClassicalRiskLevel.CRITICAL,
+        quantum_risk=QuantumRiskLevel.NOT_APPLICABLE,
+        rationale="Triple DES (3DES) is disallowed for encryption under current NIST guidance (SP 800-67 Rev. 2 withdrew it for new use); it should not be used for new encryption, independent of quantum considerations.",
+        standard_reference="NIST SP 800-67 Rev. 2 (3DES encryption disallowed)",
+    ),
+    Rule(
+        rule_id="DSA-GENERIC-001",
+        algorithm="DSA",
+        key_size_min=None, key_size_max=None, requires_known_key_size=False,
+        classical_risk=ClassicalRiskLevel.ACCEPTABLE_TODAY,
+        quantum_risk=QuantumRiskLevel.HIGH,
+        rationale=(
+            "DSA is a quantum-vulnerable public-key signature algorithm, in the same family as RSA/ECDSA for "
+            "IR 8547 purposes. NOTE: this rule does not yet model DSA-specific key-size thresholds (unlike RSA) - "
+            "that distinction has not been separately verified for this prototype, so classical risk here is a "
+            "simplified 'currently approved, quantum-vulnerable' verdict rather than a key-size-aware one."
+        ),
+        standard_reference=f"{SP_800_131A_REV2}; {IR_8547_DRAFT}",
+    ),
+    Rule(
+        rule_id="DH-GENERIC-001",
+        algorithm="DH",
+        key_size_min=None, key_size_max=None, requires_known_key_size=False,
+        classical_risk=ClassicalRiskLevel.ACCEPTABLE_TODAY,
+        quantum_risk=QuantumRiskLevel.HIGH,
+        rationale=(
+            "Finite-field Diffie-Hellman (DH) key establishment is explicitly named alongside RSA/ECDH as a "
+            "quantum-vulnerable algorithm in NIST IR 8547's deprecation schedule. As with DSA, this rule does "
+            "not yet model DH-specific key-size thresholds - classical risk is a simplified verdict."
+        ),
+        standard_reference=f"{SP_800_131A_REV2}; {IR_8547_DRAFT}",
+    ),
 ]
 
 # Algorithms for which we deliberately have no scoring rule - e.g. generic
 # library/import indicators that don't identify a specific algorithm. These
 # are intentionally NOT given a fabricated risk level.
-UNSCOREABLE_ALGORITHMS = {"cryptography_library", "cryptography.hazmat", "hashlib"}
+UNSCOREABLE_ALGORITHMS = {"cryptography_library", "cryptography.hazmat", "hashlib", "pycryptodome_library"}
 
 
 def find_matching_rule(algorithm: str, key_size: int | None) -> Rule | None:

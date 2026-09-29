@@ -6,9 +6,10 @@ venv/
 .mypy_cache/
 *.egg-info/
 
-# Scan output/reports (generated, not source)
-*.json
-!sample_project/**/*.json
+# Generated scan output / migration tracking state - not source, created at runtime
+report.json
+migration_state.json
+*.report.json
 
 # Editor/OS cruft
 .vscode/

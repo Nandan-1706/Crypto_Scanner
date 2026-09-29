@@ -68,6 +68,23 @@ def recommend_for(asset: CryptoAsset) -> PQCRecommendation:
             standard_reference=FIPS_203,
         )
 
+    if purpose == "key_generation" and algorithm == "DSA":
+        # Unlike RSA (which can be used for either signing OR encryption),
+        # DSA is EXCLUSIVELY a digital signature algorithm - so key
+        # generation here is NOT ambiguous the way RSA's is.
+        return PQCRecommendation(
+            asset_id=asset.asset_id,
+            applies=True,
+            direction=f"{FIPS_204}, with {FIPS_205} as a conservative hash-based alternative",
+            rationale=(
+                "DSA key generation was detected. DSA is exclusively a digital signature "
+                "algorithm (it has no encryption/key-establishment mode, unlike RSA), so this "
+                "use is unambiguously a signing use case. ML-DSA is the primary NIST-standardized "
+                "PQC signature scheme; SLH-DSA is a conservative hash-based alternative."
+            ),
+            standard_reference=f"{FIPS_204}; {FIPS_205}",
+        )
+
     if purpose == "key_generation" and algorithm in _AMBIGUOUS_KEY_GENERATION_ALGORITHMS:
         return PQCRecommendation(
             asset_id=asset.asset_id,
@@ -98,12 +115,25 @@ def recommend_for(asset: CryptoAsset) -> PQCRecommendation:
             standard_reference="NIST IR 8547 (draft) - symmetric algorithm guidance",
         )
 
-    if algorithm in ("SHA-256", "SHA-1", "MD5"):
-        if algorithm == "SHA-256":
+    if algorithm in ("DES", "3DES"):
+        return PQCRecommendation(
+            asset_id=asset.asset_id,
+            applies=False,
+            direction=None,
+            rationale=(
+                f"{algorithm} should be replaced with a currently-approved symmetric cipher "
+                f"(e.g. AES-256) for CLASSICAL security reasons - {algorithm} is already broken "
+                f"or disallowed today, independent of quantum computing or PQC migration."
+            ),
+            standard_reference=None,
+        )
+
+    if algorithm in ("SHA-224", "SHA-256", "SHA-384", "SHA-512", "SHA-1", "MD5"):
+        if algorithm in ("SHA-224", "SHA-256", "SHA-384", "SHA-512"):
             rationale = (
-                "SHA-256 is a hash function, not a public-key algorithm - it is not part of "
-                "the PQC migration (which addresses quantum-vulnerable public-key crypto). "
-                "It remains currently approved."
+                f"{algorithm} is a hash function, not a public-key algorithm - it is not part of "
+                f"the PQC migration (which addresses quantum-vulnerable public-key crypto). "
+                f"It remains currently approved."
             )
         else:
             rationale = (

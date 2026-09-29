@@ -1,198 +1,368 @@
-# SIH26164 - Cryptographic Discovery Tool: Scanner Core (Phase 1)
+# SIH26164 - Cryptographic Discovery & Post-Quantum Migration Assistant
 
-This is Phase 1 of a larger Cryptographic Discovery and Quantum Risk
-Assessment Tool built for Smart India Hackathon problem statement SIH26164.
+A Smart India Hackathon (problem statement SIH26164) prototype that scans a
+Python codebase, builds a cryptographic inventory, explains the risk of what
+it finds, suggests a post-quantum migration direction, and tracks whether a
+finding was actually fixed - by rescanning and verifying, not by trusting a
+status label alone.
 
-Phase 1 delivers **only the scanner core**: given a Python project directory,
-it discovers cryptographic indicators and produces a structured JSON
-inventory. It does **not** include a web dashboard, API server, database,
-risk scoring, or PQC migration recommendations - those are later phases.
+## Problem statement / project purpose
 
-## What it does
+Organizations often don't know where cryptography is used in their own
+codebases, which of those usages are weak or quantum-vulnerable, or which
+ones should be fixed first. Existing tools can provide cryptographic
+discovery/inventory capabilities. This project's contribution is not "we can
+find RSA" - it's connecting discovery to an **explainable, evidence-based
+risk assessment**, **prioritization**, a **purpose-aware migration
+direction**, and **migration tracking with rescan-based verification**, in
+one lightweight, locally-runnable workflow:
 
 ```
-project directory
-    -> file discovery (safe, relevant files only)
-    -> pattern detection (regex/keyword based, low/medium confidence)
-    -> AST analysis (real code-structure based, high confidence)
-    -> normalization (unified CryptoAsset records)
-    -> risk engine (deterministic, standards-cited classical + quantum risk scoring)
-    -> JSON report
+DISCOVER -> INVENTORY -> ASSESS -> PRIORITIZE -> RECOMMEND -> MIGRATE -> VERIFY
 ```
 
-## Risk scoring (Phase 2)
+## Architecture overview
 
-Every scored asset gets TWO separate, independently-labeled risk verdicts:
-
-- **`classical_risk`** - is this weak/broken *today*, ignoring quantum computers? Based on **NIST SP 800-131A Rev. 2** (finalized, 2019).
-- **`quantum_risk`** - will this need to change *because of* quantum computers? Based on **NIST IR 8547** (Initial Public Draft, Nov 2024 - not yet a finalized standard; the JSON output always says so in `standard_reference`).
-
-Every scored asset's `rule_id` and `standard_reference` trace back to `risk_engine/rules.py`, which is plain, reviewable data - not hidden logic. There is no code path that produces a risk level without a cited source.
-
-**LOW-confidence findings are never risk-scored.** Since Phase 1's pattern detector can match keywords inside comments/docstrings, scoring those as if they were real risky code would be an invented security claim. They're returned with `scoring_status: "skipped_low_confidence"` and a note recommending manual review instead.
-
-**Unrecognized algorithms are never given a fabricated verdict.** If the rule table doesn't cover something (or it's a generic import indicator with no specific algorithm), the result is `unknown_insufficient_data` with an explicit rationale - not a guess.
-
-Recommendation/migration-path guidance (i.e., *what to migrate to*) is intentionally **not** part of the risk engine - that's planned as a separate, later phase.
-
-## Running it
-
-```bash
-pip install -r requirements.txt
-python main.py sample_project
+```
+Project directory (ANY local path, not hard-coded to sample_project)
+        |
+        v
+   Phase 1: scanner/            "WHERE is cryptography used?"
+   (file discovery, pattern matching, AST analysis, normalization)
+        |
+        v
+   CryptoAsset inventory (evidence: file, line, algorithm, confidence)
+        |
+        +---------------------------+
+        v                           v
+   Phase 2: risk_engine/       risk_engine/cvss.py
+   "HOW RISKY is it?"          (SEPARATE module - see below)
+   (algorithm/quantum risk,
+    business criticality,
+    data lifetime, Mosca-style
+    urgency, project-specific
+    risk score/level/priority)
+        |
+        v
+   Phase 3: recommendation/    "WHAT should we do about it?"
+   (purpose-aware PQC direction - ML-KEM / ML-DSA / SLH-DSA - or an
+    honest "cannot determine" / "not applicable" answer)
+        |
+        v
+   Phase 4: migration/          "DID WE ACTUALLY FIX IT?"
+   (migration_state.json tracking, --set-status, --verify rescan-and-compare)
+        |
+        v
+   main.py: JSON report + human-readable terminal report
 ```
 
-Or write the report to a file:
+## Phase 1 - Cryptographic discovery (`scanner/`)
 
-```bash
-python main.py sample_project --output report.json
-```
-
-## Running the tests
-
-```bash
-pip install -r requirements.txt
-pytest
-```
-
-## Detection methods and confidence
+Detects, via two independent methods:
 
 | Method | Module | What it sees | Confidence |
 |---|---|---|---|
-| Pattern matching | `scanner/pattern_detector.py` | Raw text/keywords (e.g. "MD5" appears in a line) | LOW or MEDIUM |
-| AST analysis | `scanner/ast_analyzer.py` | Actual function/attribute calls in parsed code | HIGH |
+| Pattern matching | `pattern_detector.py` | Raw text/keywords | LOW or MEDIUM |
+| AST analysis | `ast_analyzer.py` | Actual function/attribute calls in parsed code | HIGH |
 
-**Both methods can flag the same line - this is intentional.** The
-normalizer does not deduplicate across methods; correlating/reconciling
-findings from different detectors is treated as a risk-engine concern for a
-later phase, not something the scanner core silently decides.
+Both can flag the same line - this is intentional and not deduplicated (see
+`normalizer.py`); correlating confidence across methods is a risk-engine
+concern, not a discovery-time decision.
 
-## Known limitations (please read before trusting the output)
+**Algorithms/APIs detected:** MD5, SHA-1, SHA-224/256/384/512, AES, DES,
+3DES/Triple DES, RSA, DSA, ECDSA, ECC, DH, ECDH, plus `hashlib`,
+`cryptography` (including `cryptography.hazmat`), and PyCryptodome
+(`Crypto.*`) library usage.
 
-This is a Phase 1 prototype. It has real, documented gaps:
+**Security of discovery:** `.pem`/`.key`/`.pfx`/`.p12` files are never
+opened or read - excluded entirely at the file-discovery stage, before any
+content is touched. Files over 2MB are skipped. Nothing is uploaded
+anywhere; everything runs locally.
 
-- **Python only.** No support yet for other languages.
-- **Static analysis only.** Cannot detect crypto usage that's built
-  dynamically (e.g. via `getattr`, string-built imports, or heavy
-  metaprogramming).
-- **No certificate parsing yet.** `.pem`/`.key`/`.pfx`/`.p12` files are
-  intentionally excluded entirely (not read at all) until a dedicated,
-  careful certificate-metadata module is built.
-- **Pattern matching produces false positives by design.** A comment
-  mentioning "AES" or a variable named `rsa_backup_flag` will be flagged.
-  This is why confidence levels exist - low-confidence findings are hints,
-  not conclusions.
-- **AST analysis can produce false negatives.** Unusual code styles,
-  dynamic dispatch, or unrecognized library aliases can cause real crypto
-  usage to be missed entirely.
-- **No dependency-file analysis yet** (e.g. checking `requirements.txt` for
-  known-weak crypto libraries) - planned for a later phase.
-- **No risk scoring or recommendations.** This tool only reports evidence
-  of what it found and how confident it is - it does not judge whether
-  anything is "safe" or "unsafe." That judgment belongs to the (not yet
-  built) risk engine, which will use transparent, documented rules.
+**Documented limitations (not hidden):** Python source only; static
+analysis only (dynamically-built crypto calls, e.g. via `getattr`, can be
+missed); no binary, container, HSM, or cloud-KMS coverage; no claim of 100%
+detection. See the JSON report's `coverage` block, which states plainly
+what is/isn't scanned on every run.
 
-## Security notes
+## Phase 2 - Risk engine (`risk_engine/`)
 
-- Files with extensions `.pem`, `.key`, `.pfx`, `.p12` are never opened or
-  read by this scanner - they are skipped entirely at the file-discovery
-  stage.
-- Files over 2MB are skipped (unlikely to be genuine small source files).
-- Evidence snippets stored in the report are capped at 200 characters and
-  are single lines - never a full file dump.
+Produces, per asset: `classical_risk` and `quantum_risk` (from
+`rules.py`/`engine.py`, cited to NIST SP 800-131A Rev. 2 and NIST IR 8547 -
+the latter is an unfinalized draft, and every output says so), combined
+with user-supplied `business_criticality` and `data_lifetime_years`
+(`context.py`, default `UNKNOWN` - never guessed) and a Mosca-style
+migration-urgency heuristic (`mosca.py` - explicitly NOT a prediction of
+when quantum computers will exist) into one final:
 
-## Risk scoring methodology (Phase 2)
+```
+risk_score = round(min(100, A + B + C) x confidence_multiplier)
+```
 
-`risk_score = round(min(100, A + B + C) × confidence_multiplier)`
+- **A (0-40):** algorithm + quantum risk (NIST-cited)
+- **B (0-25):** business criticality (user-supplied; UNKNOWN = 10, a
+  visible neutral default, never silently LOW or HIGH)
+- **C (0-15):** data-lifetime migration urgency (Mosca-style heuristic)
+- **confidence_multiplier:** HIGH = 1.0, MEDIUM = 0.85 (LOW-confidence
+  findings are never scored at all - flagged for manual review instead)
 
-| Component | Range | Meaning | Source |
-|---|---|---|---|
-| A | 0-40 | Algorithm + quantum risk | `risk_engine/engine.py` + `rules.py` (NIST SP 800-131A Rev. 2, NIST IR 8547 draft) |
-| B | 0-25 | Business criticality | User-supplied via `context.json`, default `UNKNOWN` = 10 pts (never silently LOW/HIGH) |
-| C | 0-15 | Data-lifetime migration urgency | `risk_engine/mosca.py` - a simplified Mosca-style planning heuristic |
-| multiplier | ×0.85 or ×1.0 | Evidence confidence | MEDIUM vs HIGH (LOW-confidence assets are never scored at all) |
+`risk_level` buckets (80-100 CRITICAL / 60-79 HIGH / 35-59 MEDIUM / 0-34
+LOW) and `priority` (1-4) are **this project's own documented
+methodology** - explicitly not an official NIST or CVSS classification.
+See `risk_engine/scorer.py` for the full formula and `risk_engine/rules.py`
+for every algorithm's cited rationale.
 
-`risk_level` buckets (**our own project's documented thresholds, not an official NIST classification**): 80-100 CRITICAL, 60-79 HIGH, 35-59 MEDIUM, 0-34 LOW.
+`migration_effort_hint` (LOW/MEDIUM/HIGH) is a real, evidence-based signal
+(how many times the same algorithm appears project-wide) but is
+**excluded from the numeric score** - it's a planning/tie-breaker signal,
+not a risk factor.
 
-`priority` (1-4, deterministic):
-1. CRITICAL business criticality + quantum-vulnerable + data lifetime ≥ 10 years
-2. (CRITICAL or HIGH business criticality) + quantum-vulnerable
-3. risk_level is MEDIUM or HIGH
-4. everything else
+## CVSS - kept strictly separate (`risk_engine/cvss.py`)
 
-`migration_effort_hint` (LOW/MEDIUM/HIGH) is a real, evidence-based signal - the number of times the same algorithm appears project-wide - but it is **not** part of the numeric score. It's a tie-breaker/planning signal only.
+CVSS scores a specific, contextualized *vulnerability instance* (e.g. a
+CVE with a known exploit path) - not the abstract presence of an algorithm
+in code. This project's own risk score (above) is a **different,
+non-CVSS, crypto-migration-specific methodology**.
 
-### On the Mosca-style urgency calculation (`risk_engine/mosca.py`)
+`risk_engine/cvss.py` is a standalone module with one entry point,
+`assess()`. In this phase it **always returns `applies=False`** with an
+explanation - it does not fabricate a CVSS score, severity, or vector for
+a bare "this code uses MD5" finding, because that isn't the kind of thing
+CVSS is designed to score. Nothing else in the codebase depends on this
+module's internals; a future phase that cross-references discovered
+library *versions* against a real CVE database could populate real
+CVSS data here without changing how the rest of the system calls it.
 
-This is a deliberately narrowed version of Michele Mosca's well-known "x + y > z" framework. We only have real data for one side of that comparison (the user-supplied data lifetime), so `mosca.py` does **not** attempt to estimate migration time or a quantum-threat-horizon date - doing so would mean inventing numbers we have no basis for. It only expresses relative urgency from data lifetime. **It is not a prediction of when quantum computers capable of breaking current cryptography will exist.**
+## Phase 3 - PQC recommendation (`recommendation/`)
 
-### User-supplied context
+Purpose-aware, not algorithm-aware: RSA used for signing needs a different
+replacement than RSA used for key establishment, and Phase 1's evidence
+often can't tell which one it is - when it can't, `recommendation/rules.py`
+says so explicitly rather than guessing.
 
-Business criticality and data lifetime **cannot be determined by scanning code** - they require human knowledge of the application. Supply them via a `context.json` file:
+| Purpose | Recommendation | Standard |
+|---|---|---|
+| Digital signatures (RSA/DSA/ECDSA signing; DSA key generation, which is unambiguous) | ML-DSA, with SLH-DSA as a conservative alternative | FIPS 204; FIPS 205 |
+| Key establishment (ECDH, DH, or RSA/ECC key generation whose actual use is confirmed) | ML-KEM | FIPS 203 |
+| Ambiguous key generation (RSA/ECC alone - could be either) | **No recommendation given** - explicitly flagged as needing manual review | - |
+| Symmetric encryption (AES) | Not part of the PQC family swap - ensure sufficient key length (e.g. AES-256) instead | NIST IR 8547 (draft), Grover's-algorithm guidance |
+| Hashing (SHA-2 family) | Already currently approved, not part of PQC migration | - |
+| Broken/disallowed classically (MD5, SHA-1, DES, 3DES) | Replace for classical reasons - unrelated to quantum computing | - |
 
+SHA-256 is never described as a post-quantum replacement for RSA/ECC -
+it's a different kind of algorithm addressing a different kind of risk.
+Every recommendation is a **migration direction**, never an automatic code
+change - this tool does not rewrite source code.
+
+## Phase 4 - Migration tracking & verification (`migration/`)
+
+Statuses: `NOT_STARTED -> PLANNED -> IN_PROGRESS -> MIGRATED -> VERIFIED`.
+
+**Why `CryptoAsset.asset_id` can't be used for tracking:** it's a fresh
+random UUID on every scan, so it can't identify "the same finding" across
+separate tool invocations. Phase 4 instead uses a **stable `tracking_id`**
+- a fingerprint of `(file_path, line_number, algorithm)` - computed by
+`risk_engine.migration.compute_tracking_id()`. This is a heuristic
+identity, not a guarantee: inserting/removing lines earlier in a file
+shifts every subsequent finding's tracking_id (a documented limitation).
+
+**State persistence (`migration/state.py`):** a flat `migration_state.json`
+file inside the *scanned* project's directory (no database) - so tracking
+state travels with whichever project is being tracked.
+
+**Status transitions (`migration/tracker.py`):** skipping forward is
+allowed (e.g. `NOT_STARTED -> MIGRATED` directly, since a developer may fix
+something without ever running `--set-status` along the way); moving
+*backward* is rejected except an explicit reset to `NOT_STARTED`.
+`VERIFIED` **cannot be set directly by the user at all** - see below.
+
+**Verification (`migration/verifier.py`, triggered by `--verify`):**
+rescans the project and only promotes a `MIGRATED` record to `VERIFIED` if
+the rescan shows real evidence:
+1. **`verified_removed`** - the original finding's tracking_id no longer
+   appears at all (the code was removed/replaced), OR
+2. **`verified_risk_reduced`** - the finding is still there, but its
+   `risk_level` measurably dropped compared to what was last recorded.
+
+If neither is true, the record **stays `MIGRATED`, not `VERIFIED`** -
+setting a status is never, by itself, treated as proof of a real fix.
+
+Phase 4 reuses Phase 1/2/3 entirely - there is no second scanner. Every
+`--verify` run is a completely normal scan + score, just compared against
+the previous state.
+
+## Installation
+
+```bash
+pip install -r requirements.txt
+```
+
+Only the standard library is used for Phase 1-4 logic; `pytest` is for
+running tests, and `cryptography` is only relevant if you want to actually
+execute the sample project's code (the scanner itself never imports or runs
+scanned code - it only parses it statically). Tested against Python 3.12 in
+this environment; written to be Python 3.14 / Windows compatible (pure
+standard library: `pathlib`, `argparse`, `json`, `hashlib`, `datetime`,
+`dataclasses`, `enum`, `ast`, `re` - no OS-specific code paths).
+
+## Usage
+
+**Scan any local project (not hard-coded to sample_project):**
+```bash
+python main.py "/path/to/your/project"
+python main.py "D:\some\real\project"          # Windows-style path works identically
+python main.py sample_project --context sample_context/critical_long_lifetime.json
+```
+
+By default this prints a human-readable report to the terminal AND writes
+a machine-readable JSON report (`report.json` by default, or `--output
+PATH`). Use `--json-only` to suppress the human-readable output.
+
+**Update a finding's migration status** (TRACKING_ID comes from a fresh
+scan's report/JSON - it's stable across scans, unlike the internal
+per-run `asset_id`):
+```bash
+python main.py PROJECT_PATH --set-status TRACKING_ID MIGRATED
+```
+
+**Rescan and check whether MIGRATED findings can be promoted to VERIFIED:**
+```bash
+python main.py PROJECT_PATH --verify
+```
+
+**Supply business context** (optional; both default to `UNKNOWN` and this
+is made visible in the output, never silently guessed):
 ```json
 {
   "business_criticality": "CRITICAL",
   "data_lifetime_years": 15
 }
 ```
-
 ```bash
-python main.py sample_project --context sample_context/critical_long_lifetime.json
+python main.py PROJECT_PATH --context context.json
+```
+See `sample_context/` for example files at different criticality/lifetime
+levels.
+
+## Example output (abridged, from a real run)
+
+```
+==================================================
+CRYPTOGRAPHIC RISK REPORT
+==================================================
+
+Project: sample_project
+
+Assets Found: 65
+
+CRITICAL: 1
+HIGH: 6
+MEDIUM: 30
+LOW: 0
+
+---
+
+## TOP PRIORITIES
+
+Asset: asset-10bda27c9e41
+Tracking ID: 8db5f50caf216fd6
+Algorithm: RSA
+Key Size: 1024
+File: sample_project/weak_examples.py:24
+Risk Score: 80
+Risk Level: CRITICAL
+Priority: 1
+Quantum Risk: high
+Business Criticality: CRITICAL
+Data Lifetime: 15 years
+
+Migration Recommendation:
+  'RSA' key generation was detected, but the scanner cannot determine
+  whether the key is used for signing or key establishment. Manual
+  review needed.
+
+Migration Status:
+  NOT_STARTED
+
+---
+
+## MIGRATION SUMMARY
+
+NOT_STARTED: 65
+PLANNED: 0
+IN_PROGRESS: 0
+MIGRATED: 0
+VERIFIED: 0
+
+---
+
+## COVERAGE
+
+Python source: SCANNED
+Other programming languages: NOT SCANNED
+Certificates and key files: NOT SCANNED
+Binary files and compiled artifacts: NOT SCANNED
+Container images: NOT SCANNED
+Hardware security modules: NOT SCANNED
+Cloud KMS: NOT SCANNED
 ```
 
-If omitted, both are treated as `UNKNOWN` and this is made visible in every affected asset's `reasons`. See `sample_context/` for example files at different criticality/lifetime levels. Context is currently applied project-wide; per-file/per-component context is a natural future extension, not built in this phase.
+## Testing
 
-### PQC recommendation layer (`recommendation/`)
+```bash
+pytest -q
+```
 
-A small, deterministic, purpose-based mapping - **not wired automatically into the risk score**, but included in the JSON output as `pqc_recommendation` per asset:
+18 test files, covering Phase 1 (file discovery, pattern detection, AST
+analysis, normalization, plus the expanded algorithm set), Phase 2 (risk
+rules, context, Mosca heuristic, scorer, CVSS separation), Phase 3
+(purpose-based recommendations), and Phase 4 (migration state persistence,
+status-transition rules, rescan verification, and CLI integration tests
+that actually invoke `main.py` as a subprocess against custom project
+paths - not just sample_project).
 
-- Digital signatures → **ML-DSA** (NIST FIPS 204), with SLH-DSA (FIPS 205) noted as a conservative hash-based alternative
-- Key establishment/exchange → **ML-KEM** (NIST FIPS 203)
-- Ambiguous cases (e.g. `rsa.generate_private_key()` alone, which could be used for either signing or encryption) → **no recommendation given**, with an explicit rationale that guessing here would be bad advice
-- Symmetric encryption (AES) and hashing (SHA-256) → explained as **not** part of the PQC family swap (see `recommendation/rules.py` for why)
+## Security / privacy
 
-### Migration tracking (architecture only)
-
-`risk_engine/migration.py` defines `MigrationStatus` (NOT_STARTED / PLANNED / IN_PROGRESS / MIGRATED / VERIFIED) and a `MigrationRecord` shape. There is no persistence layer yet, so every asset in this phase's output is honestly reported as `NOT_STARTED` - this is architecture for a future phase (FastAPI + Supabase), not a working tracker yet.
-
-### Quantum Readiness Score (documented, not computed)
-
-A future project-level score (e.g. "42/100 before migration, 81/100 after") would be calculated as a criticality-weighted aggregate of `risk_score` across all non-MIGRATED/VERIFIED assets, inverted to a 0-100 "readiness" number. This is **not implemented in Phase 2** - with every asset currently `NOT_STARTED`, any number shown today would just be an inverse of total risk, not a real readiness measurement, so we're not fabricating one until migration tracking is real.
-
-### Coverage / blind-spot reporting (`risk_engine/coverage.py`)
-
-Every report includes a `coverage` block stating plainly what is and isn't scanned (Python source only; not certificates, binaries, containers, HSMs, cloud KMS, other languages) - so the tool never implies broader coverage than it has.
-
-### External scanner adapter (architecture only)
-
-`scanner/external/base.py` defines an `ExternalScannerAdapter` interface (one method: `run(project_path) -> list[CryptoAsset]`). No concrete adapter (e.g. CodeQL) is implemented. The rule that matters: **an external adapter only produces discovery findings in our `CryptoAsset` shape - it never produces its own risk score.** All risk scoring stays in `risk_engine/`, applied uniformly regardless of which scanner produced a finding. `main.py` does not import this module, so the project's behavior is unchanged whether or not this is ever implemented.
+- Runs entirely locally - no source code is uploaded anywhere, no cloud AI
+  service is called, no telemetry.
+- `.pem`/`.key`/`.pfx`/`.p12` files are never opened or read.
+- The scanner never prints secret material, private keys, or passwords.
+- Automatic code rewriting is explicitly out of scope - every
+  recommendation is a migration *direction*, never an automatic change.
+- CVSS scores are never fabricated for a bare algorithm-usage finding
+  without real vulnerability-instance data (see the CVSS section above).
 
 ## Project structure
 
 ```
 scanner/
-    file_discovery.py   - finds safe, relevant files to scan
-    pattern_detector.py - regex/keyword-based detection (low/medium confidence)
-    ast_analyzer.py      - AST-based detection of real API usage (high confidence)
-    models.py             - RawFinding and CryptoAsset data shapes
-    normalizer.py         - converts RawFindings into report-ready CryptoAssets
+    file_discovery.py       - finds safe, relevant files to scan
+    pattern_detector.py     - regex/keyword-based detection (low/medium confidence)
+    ast_analyzer.py          - AST-based detection of real API usage (high confidence)
+    models.py                 - RawFinding and CryptoAsset data shapes
+    normalizer.py              - converts RawFindings into report-ready CryptoAssets
     external/
-        base.py             - adapter INTERFACE for future external scanners (not implemented)
+        base.py                  - adapter INTERFACE for future external scanners (not implemented)
 risk_engine/
-    rules.py              - classical/quantum risk rule table, NIST-cited
-    engine.py               - applies rules.py to CryptoAssets -> RiskAssessment
-    context.py                - BusinessCriticality/DataLifetime, user-supplied via context.json
-    mosca.py                    - Mosca-style migration urgency heuristic (planning aid, not a prediction)
-    scorer.py                     - combines engine + context + mosca into final RiskScore
-    migration.py                    - MigrationStatus data model (architecture only, no persistence)
-    coverage.py                      - what is/isn't scanned, reported honestly
-    models.py                          - RiskAssessment data shape
+    rules.py                  - classical/quantum risk rule table, NIST-cited
+    engine.py                   - applies rules.py to CryptoAssets -> RiskAssessment
+    context.py                    - BusinessCriticality/DataLifetime, user-supplied via context.json
+    mosca.py                        - Mosca-style migration urgency heuristic
+    scorer.py                         - combines engine + context + mosca into final RiskScore
+    migration.py                       - MigrationStatus/MigrationRecord data model + compute_tracking_id
+    coverage.py                          - what is/isn't scanned, reported honestly
+    cvss.py                                - SEPARATE CVSS module (see above)
+    models.py                                - RiskAssessment data shape
 recommendation/
-    models.py              - PQCRecommendation data shape
-    rules.py                 - purpose-based PQC direction mapping, NIST-cited
-sample_context/           - example context.json files (critical/high/low criticality + lifetime)
-tests/                    - one test file per module
-sample_project/            - safe, synthetic code used for demos and tests
-main.py                     - CLI entry point, orchestrates the full pipeline
+    models.py                  - PQCRecommendation data shape
+    rules.py                     - purpose-based PQC direction mapping, NIST-cited
+migration/
+    state.py                    - migration_state.json load/save
+    tracker.py                    - sync records against fresh scans, validated status transitions
+    verifier.py                     - rescan-based VERIFIED promotion logic
+report.py                     - human-readable terminal report builder
+main.py                        - CLI entry point, orchestrates the full pipeline
+sample_project/                 - safe, synthetic code used for demos and tests
+sample_context/                  - example context.json files
+tests/                             - one or more test files per module (18 files total)
 ```

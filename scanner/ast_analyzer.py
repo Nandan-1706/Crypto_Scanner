@@ -33,16 +33,26 @@ from scanner.models import Confidence, DetectionMethod, RawFinding
 # `hashes.SHA256(...)` (after `from ... import hashes`) both match.
 _CALL_SIGNATURES: list[tuple[re.Pattern, str, str | None]] = [
     (re.compile(r"\brsa\.generate_private_key\b"), "RSA", "key_generation"),
+    (re.compile(r"\bdsa\.generate_private_key\b"), "DSA", "key_generation"),
     (re.compile(r"\bec\.generate_private_key\b"), "ECC", "key_generation"),
     (re.compile(r"\bec\.ECDSA\b"), "ECDSA", "signing"),
     (re.compile(r"\bec\.ECDH\b"), "ECDH", "key_exchange"),
+    (re.compile(r"\bdh\.generate_parameters\b"), "DH", "key_exchange"),
+    (re.compile(r"\bhashes\.SHA224\b"), "SHA-224", "hashing"),
     (re.compile(r"\bhashes\.SHA256\b"), "SHA-256", "hashing"),
+    (re.compile(r"\bhashes\.SHA384\b"), "SHA-384", "hashing"),
+    (re.compile(r"\bhashes\.SHA512\b"), "SHA-512", "hashing"),
     (re.compile(r"\bhashes\.SHA1\b"), "SHA-1", "hashing"),
     (re.compile(r"\bhashes\.MD5\b"), "MD5", "hashing"),
     (re.compile(r"\balgorithms\.AES\b"), "AES", "encryption"),
+    (re.compile(r"\balgorithms\.TripleDES\b"), "3DES", "encryption"),
+    (re.compile(r"\balgorithms\.DES\b"), "DES", "encryption"),
     (re.compile(r"\bhashlib\.md5\b"), "MD5", "hashing"),
     (re.compile(r"\bhashlib\.sha1\b"), "SHA-1", "hashing"),
+    (re.compile(r"\bhashlib\.sha224\b"), "SHA-224", "hashing"),
     (re.compile(r"\bhashlib\.sha256\b"), "SHA-256", "hashing"),
+    (re.compile(r"\bhashlib\.sha384\b"), "SHA-384", "hashing"),
+    (re.compile(r"\bhashlib\.sha512\b"), "SHA-512", "hashing"),
 ]
 
 # Import statements that indicate cryptography.hazmat usage, even if we
@@ -50,6 +60,13 @@ _CALL_SIGNATURES: list[tuple[re.Pattern, str, str | None]] = [
 # from it. This gives partial credit for "this project touches crypto
 # internals" without pretending to know exactly what algorithm is used.
 _HAZMAT_IMPORT_PATTERN = re.compile(r"^cryptography\.hazmat")
+
+# Same idea for PyCryptodome (the `Crypto` package - Crypto.Cipher,
+# Crypto.PublicKey, Crypto.Hash, Crypto.Signature, etc.). We don't have
+# specific call-signature matches for its API yet (different call shapes
+# than the `cryptography` library), so this only records that the library
+# is touched - a real, documented, partial-credit finding, not a guess.
+_PYCRYPTODOME_IMPORT_PATTERN = re.compile(r"^Crypto(\.|$)")
 
 
 def scan_file(file_path: str | Path) -> list[RawFinding]:
@@ -144,6 +161,16 @@ def _check_import(node: ast.Import | ast.ImportFrom, path: Path, source_lines: l
                 evidence=_evidence_line(source_lines, getattr(node, "lineno", None)),
                 confidence=Confidence.HIGH,
                 cryptographic_purpose=None,  # we know hazmat is touched, not what for
+            ))
+        elif _PYCRYPTODOME_IMPORT_PATTERN.match(module_name):
+            findings.append(RawFinding(
+                file_path=str(path),
+                line_number=getattr(node, "lineno", None),
+                algorithm="pycryptodome_library",
+                detection_method=DetectionMethod.AST_ANALYSIS,
+                evidence=_evidence_line(source_lines, getattr(node, "lineno", None)),
+                confidence=Confidence.HIGH,
+                cryptographic_purpose=None,  # we know the library is touched, not what for
             ))
 
     return findings

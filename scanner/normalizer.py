@@ -25,15 +25,23 @@ from scanner.models import CryptoAsset, RawFinding
 # review and extend.
 _ASSET_TYPE_BY_ALGORITHM: dict[str, str] = {
     "RSA": "asymmetric_key_usage",
+    "DSA": "asymmetric_key_usage",
     "ECC": "asymmetric_key_usage",
     "ECDSA": "signature_usage",
     "ECDH": "key_exchange_usage",
+    "DH": "key_exchange_usage",
     "AES": "symmetric_encryption_usage",
+    "DES": "symmetric_encryption_usage",
+    "3DES": "symmetric_encryption_usage",
+    "SHA-224": "hash_usage",
     "SHA-256": "hash_usage",
+    "SHA-384": "hash_usage",
+    "SHA-512": "hash_usage",
     "SHA-1": "hash_usage",
     "MD5": "hash_usage",
     "cryptography_library": "library_import",
     "cryptography.hazmat": "library_import",
+    "pycryptodome_library": "library_import",
     "hashlib": "library_import",
 }
 
